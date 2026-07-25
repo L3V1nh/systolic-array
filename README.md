@@ -143,3 +143,23 @@ To examine the behavioral waveform characteristics, open the generated dump file
 gtkwave systolic_tb.vcd
 
 ```
+
+## Additional features:
+- Ready/Valid handshake to stream data
+```text
+module systolic_enhanced (
+    input wire clk,
+    input wire rst,
+    
+    // --- ENHANCED INPUT INTERFACE (Streaming Handshake) ---
+    input wire  [7:0] in_data,   // Streams matrix elements sequentially
+    input wire        in_valid,  // Asserted when host has valid data ready
+    output reg        in_ready,  // Asserted when systolic array is ready to accept data
+    
+    // --- ENHANCED OUTPUT INTERFACE (Streaming Handshake) ---
+    output reg [15:0] out_data,  // Streams out 16-bit products one element at a time
+    output reg        out_valid, // Asserted when systolic array has computed a valid result element
+    input wire        out_ready  // Asserted when downstream block is ready to read the output
+);
+
+```
