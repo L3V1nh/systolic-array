@@ -1,27 +1,28 @@
 module processing_element #(
-    parameter WIDTH = 8
+    parameter DATA_W = 8
+    parameter ACC_W = 16
 )(
     input wire clk,
     input wire rst,
-    input wire signed [WIDTH-1:0] row,
-    input wire signed [WIDTH-1:0] col,
-    output reg signed [WIDTH-1:0] row_out,
-    output reg signed [WIDTH-1:0] col_out,
-    output reg signed [2*WIDTH-1:0] out
+    input wire signed [DATA_W-1:0] row,
+    input wire signed [DATA_W-1:0] col,
+    output reg signed [DATA_W-1:0] row_out,
+    output reg signed [DATA_W-1:0] col_out,
+    output reg signed [ACC_W-1:0] out
 );
 
-    wire signed [2*WIDTH-1:0] product;
+    wire signed [2*DATA_W-1:0] product;
 
-    BoothMultiplier #(.WIDTH(WIDTH)) mul (
+    BoothMultiplier #(.DATA_W(DATA_W)) mul (
     .multiplicand(row),
     .multiplier(col),
     .product(product)
     );
     always @(posedge clk) begin
     if (rst) begin
-        out     <= {2*WIDTH{1'b0}};
-        row_out <= {WIDTH{1'b0}};
-        col_out <= {WIDTH{1'b0}};
+        out     <= {2*DATA_W{1'b0}};
+        row_out <= {DATA_W{1'b0}};
+        col_out <= {DATA_W{1'b0}};
     end else begin
         out     <= out + product;
         row_out <= row;
