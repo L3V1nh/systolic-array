@@ -1,5 +1,5 @@
 module processing_element #(
-    parameter DATA_W = 8
+    parameter DATA_W = 8,
     parameter ACC_W = 16
 )(
     input wire clk,
@@ -20,7 +20,7 @@ module processing_element #(
     );
     always @(posedge clk) begin
     if (rst) begin
-        out     <= {2*DATA_W{1'b0}};
+        out     <= {ACC_W{1'b0}};
         row_out <= {DATA_W{1'b0}};
         col_out <= {DATA_W{1'b0}};
     end else begin

@@ -29,7 +29,10 @@ module systolic_grid #(
         for (r = 0; r < N; r = r + 1) begin 
             for (c = 0; c < N; c = c + 1) begin
                 
-                processing_element pe (
+                processing_element #(
+                        .DATA_W(DATA_W),
+                        .ACC_W(ACC_W)
+                    ) pe (
                     .clk,
                     .rst,
                     .row(h_bus[r][c]),      

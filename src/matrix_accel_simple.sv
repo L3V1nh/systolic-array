@@ -1,8 +1,7 @@
-import matrix_pkg::*
 module matrix_accel_simple #(
-    parameter N = matrix_pkg::N,
-    parameter DATA_W = matrix_pkg::DATA_W,
-    parameter ACC_W = matrix_pkg::ACC_W
+    parameter N = 2,
+    parameter DATA_W = 8,
+    parameter ACC_W = 16
 )(
     input logic clk,
     input logic rst,
@@ -19,37 +18,46 @@ module matrix_accel_simple #(
     logic signed [DATA_W-1:0] col [N];
     logic signed [DATA_W-1:0] col_next [N];
 
+    int feed_cnt;
+    int feed_cnt_next;
+    
+    typedef enum logic [2:0] {
+        IDLE,
+        LOAD,
+        FEED,
+        DONE
+    } state_t;
+
     state_t state, state_next;
     always_ff @( posedge clk ) begin : registers
         if(rst) begin
-            for (int i = 0; i < N ; i++) begin
-                for (int j = 0; j < N ; j++) begin
-                    matrix_c[i][j] <= 0;
-                end
-            end
-            done <= 0;
             state <= IDLE;
+            feed_cnt <= 0;
+            for (int i = 0; i < N; i++) begin
+                row[i] <= '0;
+                col[i] <= '0;
+            end
         end
         else begin
             row <= row_next;
             col <= col_next;
             state <= state_next;
+            feed_cnt <= feed_cnt_next;
         end
     end
 
     logic calc_done;
     assign calc_done = (feed_cnt == (2*N-1));
     always_comb begin : state_logic
+        state_next = state;
         case (state)
             IDLE: if(start) state_next = FEED;
             FEED: if(calc_done) state_next = DONE;
             DONE: state_next =  (start)? FEED:IDLE;
-            default:
         endcase
     end
 
-    int feed_cnt;
-    int feed_cnt_next;
+    
     int row_idx;
     int col_idx;
 
@@ -109,4 +117,14 @@ module matrix_accel_simple #(
     end
     
     assign done = (state==DONE);
+
+    systolic_grid #(.N(2),
+                    .DATA_W(8),
+                    .ACC_W(16)) grid(
+                        .clk,
+                        .rst,
+                        .row,
+                        .col,
+                        .matrix_out(matrix_c)
+                    );
 endmodule
