@@ -20,11 +20,14 @@ module matrix_accel_simple #(
 
     int feed_cnt;
     int feed_cnt_next;
+    int flush_cnt;
+    int flush_cnt_next;
     
     typedef enum logic [2:0] {
         IDLE,
         LOAD,
         FEED,
+        FLUSH,
         DONE
     } state_t;
 
@@ -33,6 +36,7 @@ module matrix_accel_simple #(
         if(rst) begin
             state <= IDLE;
             feed_cnt <= 0;
+            flush_cnt <=0;
             for (int i = 0; i < N; i++) begin
                 row[i] <= '0;
                 col[i] <= '0;
@@ -43,16 +47,16 @@ module matrix_accel_simple #(
             col <= col_next;
             state <= state_next;
             feed_cnt <= feed_cnt_next;
+            flush_cnt <= flush_cnt_next;
         end
     end
 
-    logic calc_done;
-    assign calc_done = (feed_cnt == (2*N-1));
     always_comb begin : state_logic
         state_next = state;
         case (state)
             IDLE: if(start) state_next = FEED;
-            FEED: if(calc_done) state_next = DONE;
+            FEED: if(feed_cnt == (2*N-1)) state_next = FLUSH;
+            FLUSH: if(flush_cnt == (N-2)) state_next = DONE;
             DONE: state_next =  (start)? FEED:IDLE;
         endcase
     end
@@ -103,6 +107,14 @@ module matrix_accel_simple #(
             feed_cnt_next = feed_cnt + 1;
 
         end
+        FLUSH: begin
+            for (int i = 0; i < N; i++) begin
+                row_next[i] = '0;
+                col_next[i] = '0;
+            end
+            
+            flush_cnt_next = flush_cnt + 1;
+        end
         DONE: begin
 
             for (int i = 0; i < N; i++) begin
@@ -118,9 +130,9 @@ module matrix_accel_simple #(
     
     assign done = (state==DONE);
 
-    systolic_grid #(.N(2),
-                    .DATA_W(8),
-                    .ACC_W(16)) grid(
+    systolic_grid #(.N(N),
+                    .DATA_W(DATA_W),
+                    .ACC_W(ACC_W)) grid(
                         .clk,
                         .rst,
                         .row,
