@@ -1,5 +1,5 @@
-module matrix_accel_simple #(
-    parameter N = 2,
+module matrix_accel #(
+    parameter N = 3,
     parameter DATA_W = 8,
     parameter ACC_W = 16
 )(

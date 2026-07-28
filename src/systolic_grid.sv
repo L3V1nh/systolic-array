@@ -1,5 +1,5 @@
 module systolic_grid #(
-    parameter int N = 5,
+    parameter int N = 3,
     parameter int DATA_W = 8,
     parameter int ACC_W = 16
 )(

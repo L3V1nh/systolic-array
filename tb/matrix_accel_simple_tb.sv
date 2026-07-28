@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 module simple_tb ();
-    localparam N = 4;
+    localparam N = 3;
     localparam DATA_W = 8;
     localparam ACC_W = 16;
     logic [DATA_W-1:0] matrix_a[N][N];
