@@ -32,7 +32,7 @@ module simple_tb ();
         $write("\n");
     end
     end
-    matrix_accel_simple #(.N(N),
+    matrix_accel #(.N(N),
                     .DATA_W(DATA_W),
                     .ACC_W(ACC_W)) uut(.*);
 

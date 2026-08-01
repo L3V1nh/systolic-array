@@ -60,6 +60,11 @@ module axi4_lite_wrapper #(
     localparam logic [31:0] B_BASE = A_BASE + MAT_SIZE_BYTES;
     localparam logic [31:0] C_BASE = B_BASE + MAT_SIZE_BYTES;
 
+    assign s_axi_arready = 1'b0;
+    assign s_axi_rdata    = 32'h0;
+    assign s_axi_rresp    = 2'b00;
+    assign s_axi_rvalid   = 1'b0;
+
     function automatic int addr_to_idx(
         input logic [31:0] addr,
         input logic [31:0] base
@@ -79,51 +84,56 @@ module axi4_lite_wrapper #(
     Wstate_t wstate, wstate_next;
 
     logic [31:0] waddr_reg, wdata_reg;
-    assign aw_handshake = s_axi_awvalid&&s_axi_awready;
-    assign w_handshake = s_axi_wvalid&&s_axi_wready
+    logic aw_handshake, w_handshake;
+    assign aw_handshake = s_axi_awvalid && s_axi_awready;
+    assign w_handshake  = s_axi_wvalid && s_axi_wready;
     logic aw_received, w_received;
 
     always_ff @(posedge clk) begin
         if(rst) begin
-            wstate <= IDLE;
+            wstate <= W_IDLE;
 
-            s_axi_bvalid <= 1'b0;
-            s_axi_bresp  <= 2'b00;
-            start_reg <= 1'b0;
+            aw_received <= 1'b0;
+            w_received <= 1'b0;
+            waddr_reg <= '0;
+            wdata_reg <= '0;
 
             for (int i = 0;i < N ; i++) begin
                 for (int j = 0; j< N ;j++ ) begin
                     matrix_a[i][j] <= '0;
                     matrix_b[i][j] <= '0;
-                    matrix_c[i][j] <= '0;
                 end
             end
 
         end
         else begin
             wstate <= wstate_next;
+            if (wstate == W_RESP && s_axi_bready) begin
+                aw_received <= 1'b0;
+                w_received <= 1'b0;
+            end
             if (aw_handshake) begin
                 waddr_reg <= s_axi_awaddr;
-                aw_received <= 1;
+                aw_received <= 1'b1;
             end
             if (w_handshake) begin
                 wdata_reg <= s_axi_wdata;
-                w_received <= 1;
+                w_received <= 1'b1;
             end
         end
     end
 
-    assign s_axi_awready = (wstate == IDLE) && !aw_received;
-    assign s_axi_wready  = (wstate == IDLE) && !w_received;
+    assign s_axi_awready = (wstate == W_IDLE) && !aw_received;
+    assign s_axi_wready  = (wstate == W_IDLE) && !w_received;
 
     
 
     always_comb begin : state_transition
         wstate_next = wstate;
         case (wstate)
-            IDLE: wstate_next = (aw_received && w_received) ? WRITE:IDLE;
+            W_IDLE: wstate_next = (aw_received && w_received) ? WRITE:W_IDLE;
             WRITE: wstate_next = W_RESP;
-            W_RESP:wstate_next = (s_axi_bready) ? IDLE:W_RESP;
+            W_RESP:wstate_next = (s_axi_bready) ? W_IDLE:W_RESP;
         endcase
     end
 
@@ -165,7 +175,7 @@ module axi4_lite_wrapper #(
 
     case (wstate)
 
-        IDLE: begin
+        W_IDLE: begin
         end
 
         WRITE: begin
@@ -189,19 +199,12 @@ module axi4_lite_wrapper #(
     always_ff @(posedge clk) begin : matrix_write
 
     if (rst) begin
-        for (int i = 0;i < N ; i++) begin
-                for (int j = 0; j< N ;j++ ) begin
-                    matrix_a[i][j] <= '0;
-                    matrix_b[i][j] <= '0;
-                    matrix_c[i][j] <= '0;
-                end
-            end
+        start_reg <= 1'b0;
     end
     else begin
-
-        wstate <= wstate_next;
-
         if (wstate == WRITE) begin
+
+            start_reg <= (waddr_reg == CONTROL) ? wdata_reg[0] : 1'b0;
 
             if (a_sel)
                 matrix_a[row][col]
@@ -212,8 +215,21 @@ module axi4_lite_wrapper #(
                     <= wdata_reg[DATA_W-1:0];
 
         end
+        else begin
+            start_reg <= 1'b0;
+        end
 
     end
-
 end
+matrix_accel #(.N(N),
+                   .DATA_W(DATA_W),
+                   .ACC_W(ACC_W)) accel (
+                    .clk,
+                    .rst,
+                    .matrix_a,
+                    .matrix_b,
+                    .matrix_c,
+                    .start(start_reg),
+                    .done(done_reg)
+                   );
 endmodule
