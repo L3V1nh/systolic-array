@@ -51,11 +51,18 @@ module axi_tb ();
             s_axi_wvalid   = 1'b1;
             s_axi_bready   = 1'b1;
 
-            wait (s_axi_awready && s_axi_wready);
-            @(posedge clk);
-            #1;
-            s_axi_awvalid = 1'b0;
-            s_axi_wvalid  = 1'b0;
+            fork
+                begin
+                    wait (s_axi_awready);
+                    @(posedge clk);
+                    #1 s_axi_awvalid = 1'b0;
+                end
+                begin
+                    wait (s_axi_wready);
+                    @(posedge clk);
+                    #1 s_axi_wvalid = 1'b0;
+                end
+            join
 
             wait (s_axi_bvalid);
             @(posedge clk);

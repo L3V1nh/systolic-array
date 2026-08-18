@@ -54,7 +54,8 @@ module axi4_lite_wrapper #(
     localparam CONTROL = 32'h0;
     localparam STATUS = 32'h4;
 
-    localparam int MAT_SIZE_BYTES = N*N*4;
+    localparam int WORD_BYTES = 4;
+    localparam int MAT_SIZE_BYTES = N*N*WORD_BYTES;
 
     localparam logic [31:0] A_BASE = 32'h100;
     localparam logic [31:0] B_BASE = A_BASE + MAT_SIZE_BYTES;
@@ -73,11 +74,21 @@ module axi4_lite_wrapper #(
         addr_to_idx = (addr - base) >> 2;
     end
     endfunction
+
+    function automatic logic in_range(
+        input logic [31:0] addr,
+        input logic [31:0] base,
+        input int size_bytes
+    );
+    begin
+        in_range = (addr >= base) && (addr < (base + size_bytes));
+    end
+    endfunction
     
     // Write
     typedef enum logic [1:0] { 
         W_IDLE,
-        WRITE,
+        W_COMMIT,
         W_RESP
     } Wstate_t;
 
@@ -85,18 +96,18 @@ module axi4_lite_wrapper #(
 
     logic [31:0] waddr_reg, wdata_reg;
     logic aw_handshake, w_handshake;
+    logic aw_done, w_done;
     assign aw_handshake = s_axi_awvalid && s_axi_awready;
     assign w_handshake  = s_axi_wvalid && s_axi_wready;
-    logic aw_received, w_received;
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin: state_register
         if(rst) begin
             wstate <= W_IDLE;
 
-            aw_received <= 1'b0;
-            w_received <= 1'b0;
             waddr_reg <= '0;
             wdata_reg <= '0;
+            aw_done <= 1'b0;
+            w_done <= 1'b0;
 
             for (int i = 0;i < N ; i++) begin
                 for (int j = 0; j< N ;j++ ) begin
@@ -108,77 +119,66 @@ module axi4_lite_wrapper #(
         end
         else begin
             wstate <= wstate_next;
-            if (wstate == W_RESP && s_axi_bready) begin
-                aw_received <= 1'b0;
-                w_received <= 1'b0;
-            end
             if (aw_handshake) begin
                 waddr_reg <= s_axi_awaddr;
-                aw_received <= 1'b1;
+                aw_done <= 1'b1;
             end
             if (w_handshake) begin
                 wdata_reg <= s_axi_wdata;
-                w_received <= 1'b1;
+                w_done <= 1'b1;
+            end
+            if (wstate == W_RESP && s_axi_bready) begin
+                aw_done <= 1'b0;
+                w_done <= 1'b0;
             end
         end
     end
-
-    assign s_axi_awready = (wstate == W_IDLE) && !aw_received;
-    assign s_axi_wready  = (wstate == W_IDLE) && !w_received;
-
-    
 
     always_comb begin : state_transition
         wstate_next = wstate;
         case (wstate)
-            W_IDLE: wstate_next = (aw_received && w_received) ? WRITE:W_IDLE;
-            WRITE: wstate_next = W_RESP;
+            W_IDLE: begin
+                if ((aw_done || aw_handshake) && (w_done || w_handshake))
+                    wstate_next = W_COMMIT;
+            end
+            W_COMMIT: wstate_next = W_RESP;
             W_RESP:wstate_next = (s_axi_bready) ? W_IDLE:W_RESP;
         endcase
     end
 
-    logic a_sel, b_sel, invalid_addr;
+    logic a_sel, b_sel, control_sel, invalid_addr;
 
     int idx;
     int row;
     int col;
-    always_comb begin : addr_decode
-
-        a_sel = (waddr_reg >= A_BASE) &&
-                (waddr_reg < A_BASE + MAT_SIZE_BYTES);
-
-        b_sel = (waddr_reg >= B_BASE) &&
-                (waddr_reg < B_BASE + MAT_SIZE_BYTES);
-
-        invalid_addr = !(a_sel || b_sel);
-
-        idx = 0;
-        row = 0;
-        col = 0;
-
-        if (a_sel) begin
-            idx = addr_to_idx(waddr_reg, A_BASE);
-        end
-        else if (b_sel) begin
-            idx = addr_to_idx(waddr_reg, B_BASE);
-        end
-
-        row = idx / N;
-        col = idx % N;
-
-    end
 
     always_comb begin: datapath
 
-    s_axi_bvalid = 1'b0;
-    s_axi_bresp  = 2'b00; // OKAY
+    control_sel = (waddr_reg == CONTROL);
+    a_sel = in_range(waddr_reg, A_BASE, MAT_SIZE_BYTES);
+    b_sel = in_range(waddr_reg, B_BASE, MAT_SIZE_BYTES);
+    invalid_addr = !(control_sel || a_sel || b_sel);
+
+    idx = 0;
+    if (a_sel)
+        idx = addr_to_idx(waddr_reg, A_BASE);
+    else if (b_sel)
+        idx = addr_to_idx(waddr_reg, B_BASE);
+
+    row = idx / N;
+    col = idx % N;
+
+    s_axi_awready = (wstate == W_IDLE) && !aw_done;
+    s_axi_wready  = (wstate == W_IDLE) && !w_done;
+    s_axi_bvalid  = 1'b0;
+    s_axi_bresp   = 2'b00; // OKAY
 
     case (wstate)
 
         W_IDLE: begin
         end
 
-        WRITE: begin
+        W_COMMIT: begin
         end
 
         W_RESP: begin
@@ -202,9 +202,9 @@ module axi4_lite_wrapper #(
         start_reg <= 1'b0;
     end
     else begin
-        if (wstate == WRITE) begin
+        if (wstate == W_COMMIT) begin
 
-            start_reg <= (waddr_reg == CONTROL) ? wdata_reg[0] : 1'b0;
+            start_reg <= control_sel ? wdata_reg[0] : 1'b0;
 
             if (a_sel)
                 matrix_a[row][col]
