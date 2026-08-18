@@ -1,46 +1,40 @@
+interface axi4_lite_if;
+    logic clk;
+    logic rst;
+
+    logic [31:0] awaddr;
+    logic awvalid;
+    logic awready;
+
+    logic [31:0] wdata;
+    logic wvalid;
+    logic wready;
+
+    logic [1:0] bresp;
+    logic bvalid;
+    logic bready;
+
+    logic [31:0] araddr;
+    logic arvalid;
+    logic arready;
+
+    logic [31:0] rdata;
+    logic [1:0] rresp;
+    logic rvalid;
+    logic rready;
+
+    modport slave (
+        input clk, rst, awaddr, awvalid, wdata, wvalid, bready, araddr, arvalid, rready,
+        output awready, wready, bresp, bvalid, arready, rdata, rresp, rvalid
+    );
+endinterface
+
 module axi4_lite_wrapper #(
     parameter N = 3,
     parameter DATA_W = 8,
     parameter ACC_W = 16
 )(
-    input  logic clk,
-    input  logic rst,
-
-    //==========================
-    // Write Address Channel
-    //==========================
-    input  logic [31:0]       s_axi_awaddr,
-    input  logic              s_axi_awvalid,
-    output logic              s_axi_awready,
-
-    //==========================
-    // Write Data Channel
-    //==========================
-    input  logic [31:0]       s_axi_wdata,
-    input  logic              s_axi_wvalid,
-    output logic              s_axi_wready,
-
-    //==========================
-    // Write Response Channel
-    //==========================
-    output logic [1:0]        s_axi_bresp,
-    output logic              s_axi_bvalid,
-    input  logic              s_axi_bready,
-
-    //==========================
-    // Read Address Channel
-    //==========================
-    input  logic [31:0]       s_axi_araddr,
-    input  logic              s_axi_arvalid,
-    output logic              s_axi_arready,
-
-    //==========================
-    // Read Data Channel
-    //==========================
-    output logic [31:0]       s_axi_rdata,
-    output logic [1:0]        s_axi_rresp,
-    output logic              s_axi_rvalid,
-    input  logic              s_axi_rready
+    axi4_lite_if.slave axi
 );
 
     logic start_reg;
@@ -61,10 +55,10 @@ module axi4_lite_wrapper #(
     localparam logic [31:0] B_BASE = A_BASE + MAT_SIZE_BYTES;
     localparam logic [31:0] C_BASE = B_BASE + MAT_SIZE_BYTES;
 
-    assign s_axi_arready = 1'b0;
-    assign s_axi_rdata    = 32'h0;
-    assign s_axi_rresp    = 2'b00;
-    assign s_axi_rvalid   = 1'b0;
+    assign axi.arready = 1'b0;
+    assign axi.rdata   = 32'h0;
+    assign axi.rresp   = 2'b00;
+    assign axi.rvalid  = 1'b0;
 
     function automatic int addr_to_idx(
         input logic [31:0] addr,
@@ -84,9 +78,8 @@ module axi4_lite_wrapper #(
         in_range = (addr >= base) && (addr < (base + size_bytes));
     end
     endfunction
-    
-    // Write
-    typedef enum logic [1:0] { 
+
+    typedef enum logic [1:0] {
         W_IDLE,
         W_COMMIT,
         W_RESP
@@ -97,11 +90,11 @@ module axi4_lite_wrapper #(
     logic [31:0] waddr_reg, wdata_reg;
     logic aw_handshake, w_handshake;
     logic aw_done, w_done;
-    assign aw_handshake = s_axi_awvalid && s_axi_awready;
-    assign w_handshake  = s_axi_wvalid && s_axi_wready;
+    assign aw_handshake = axi.awvalid && axi.awready;
+    assign w_handshake  = axi.wvalid && axi.wready;
 
-    always_ff @(posedge clk) begin: state_register
-        if(rst) begin
+    always_ff @(posedge axi.clk) begin: state_register
+        if (axi.rst) begin
             wstate <= W_IDLE;
 
             waddr_reg <= '0;
@@ -109,25 +102,24 @@ module axi4_lite_wrapper #(
             aw_done <= 1'b0;
             w_done <= 1'b0;
 
-            for (int i = 0;i < N ; i++) begin
-                for (int j = 0; j< N ;j++ ) begin
+            for (int i = 0; i < N; i++) begin
+                for (int j = 0; j < N; j++) begin
                     matrix_a[i][j] <= '0;
                     matrix_b[i][j] <= '0;
                 end
             end
-
         end
         else begin
             wstate <= wstate_next;
             if (aw_handshake) begin
-                waddr_reg <= s_axi_awaddr;
+                waddr_reg <= axi.awaddr;
                 aw_done <= 1'b1;
             end
             if (w_handshake) begin
-                wdata_reg <= s_axi_wdata;
+                wdata_reg <= axi.wdata;
                 w_done <= 1'b1;
             end
-            if (wstate == W_RESP && s_axi_bready) begin
+            if (wstate == W_RESP && axi.bready) begin
                 aw_done <= 1'b0;
                 w_done <= 1'b0;
             end
@@ -142,7 +134,7 @@ module axi4_lite_wrapper #(
                     wstate_next = W_COMMIT;
             end
             W_COMMIT: wstate_next = W_RESP;
-            W_RESP:wstate_next = (s_axi_bready) ? W_IDLE:W_RESP;
+            W_RESP: wstate_next = (axi.bready) ? W_IDLE : W_RESP;
         endcase
     end
 
@@ -153,83 +145,76 @@ module axi4_lite_wrapper #(
     int col;
 
     always_comb begin: datapath
+        control_sel = (waddr_reg == CONTROL);
+        a_sel = in_range(waddr_reg, A_BASE, MAT_SIZE_BYTES);
+        b_sel = in_range(waddr_reg, B_BASE, MAT_SIZE_BYTES);
+        invalid_addr = !(control_sel || a_sel || b_sel);
 
-    control_sel = (waddr_reg == CONTROL);
-    a_sel = in_range(waddr_reg, A_BASE, MAT_SIZE_BYTES);
-    b_sel = in_range(waddr_reg, B_BASE, MAT_SIZE_BYTES);
-    invalid_addr = !(control_sel || a_sel || b_sel);
+        idx = 0;
+        if (a_sel)
+            idx = addr_to_idx(waddr_reg, A_BASE);
+        else if (b_sel)
+            idx = addr_to_idx(waddr_reg, B_BASE);
 
-    idx = 0;
-    if (a_sel)
-        idx = addr_to_idx(waddr_reg, A_BASE);
-    else if (b_sel)
-        idx = addr_to_idx(waddr_reg, B_BASE);
+        row = idx / N;
+        col = idx % N;
 
-    row = idx / N;
-    col = idx % N;
+        axi.awready = (wstate == W_IDLE) && !aw_done;
+        axi.wready  = (wstate == W_IDLE) && !w_done;
+        axi.bvalid  = 1'b0;
+        axi.bresp   = 2'b00;
 
-    s_axi_awready = (wstate == W_IDLE) && !aw_done;
-    s_axi_wready  = (wstate == W_IDLE) && !w_done;
-    s_axi_bvalid  = 1'b0;
-    s_axi_bresp   = 2'b00; // OKAY
+        case (wstate)
+            W_IDLE: begin
+            end
 
-    case (wstate)
+            W_COMMIT: begin
+            end
 
-        W_IDLE: begin
-        end
+            W_RESP: begin
+                axi.bvalid = 1'b1;
 
-        W_COMMIT: begin
-        end
+                if (invalid_addr)
+                    axi.bresp = 2'b11;
+                else
+                    axi.bresp = 2'b00;
+            end
 
-        W_RESP: begin
-            s_axi_bvalid = 1'b1;
-
-            if (invalid_addr)
-                s_axi_bresp = 2'b11; // DECERR
-            else
-                s_axi_bresp = 2'b00; // OKAY
-        end
-
-        default: begin
-        end
-
-    endcase
+            default: begin
+            end
+        endcase
     end
 
-    always_ff @(posedge clk) begin : matrix_write
-
-    if (rst) begin
-        start_reg <= 1'b0;
-    end
-    else begin
-        if (wstate == W_COMMIT) begin
-
-            start_reg <= control_sel ? wdata_reg[0] : 1'b0;
-
-            if (a_sel)
-                matrix_a[row][col]
-                    <= wdata_reg[DATA_W-1:0];
-
-            else if (b_sel)
-                matrix_b[row][col]
-                    <= wdata_reg[DATA_W-1:0];
-
-        end
-        else begin
+    always_ff @(posedge axi.clk) begin : matrix_write
+        if (axi.rst) begin
             start_reg <= 1'b0;
         end
+        else begin
+            if (wstate == W_COMMIT) begin
+                start_reg <= control_sel ? wdata_reg[0] : 1'b0;
 
+                if (a_sel)
+                    matrix_a[row][col] <= wdata_reg[DATA_W-1:0];
+                else if (b_sel)
+                    matrix_b[row][col] <= wdata_reg[DATA_W-1:0];
+            end
+            else begin
+                start_reg <= 1'b0;
+            end
+        end
     end
-end
-matrix_accel #(.N(N),
-                   .DATA_W(DATA_W),
-                   .ACC_W(ACC_W)) accel (
-                    .clk,
-                    .rst,
-                    .matrix_a,
-                    .matrix_b,
-                    .matrix_c,
-                    .start(start_reg),
-                    .done(done_reg)
-                   );
+
+    matrix_accel #(
+        .N(N),
+        .DATA_W(DATA_W),
+        .ACC_W(ACC_W)
+    ) accel (
+        .clk(axi.clk),
+        .rst(axi.rst),
+        .matrix_a(matrix_a),
+        .matrix_b(matrix_b),
+        .matrix_c(matrix_c),
+        .start(start_reg),
+        .done(done_reg)
+    );
 endmodule
